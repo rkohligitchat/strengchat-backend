@@ -19,16 +19,13 @@ module.exports = function setupSocket(server) {
 
     console.log("USER CONNECTED:", socket.id);
 
+    // ---------------- JOIN / MATCHING ----------------
     socket.on("join", () => {
       socket.emit("status", { type: "searching", message: "Searching for a stranger..." });
 
       if (socket.partner || socket.isWaiting) return;
 
-      if (
-        waitingUser &&
-        waitingUser.id !== socket.id &&
-        waitingUser.connected
-      ) {
+      if (waitingUser && waitingUser.id !== socket.id && waitingUser.connected) {
         socket.partner = waitingUser;
         waitingUser.partner = socket;
 
@@ -49,37 +46,53 @@ module.exports = function setupSocket(server) {
       }
     });
 
-   socket.on("message", (msg) => {
-  if (!socket.partner || !socket.partner.connected) return;
-
-  socket.partner.emit("message", {
-    sender: "stranger",
-    type: "text",
-    content: msg,
-  });
-});
-
-
-    // 🔥 IMAGE MESSAGE
-    socket.on("sendImage", (imageData) => {
-  console.log("Image received from:", socket.id);
-
-  if (!socket.partner) {
-    console.log("No partner found");
-    return;
-  }
-
-  console.log("Sending image to:", socket.partner.id);
-
-  socket.partner.emit("receiveImage", imageData);
-});
-
-
-
-    socket.on("typing", () => {
-      if (socket.partner) socket.partner.emit("typing");
+    // ---------------- TYPING ----------------
+    socket.on("typing", (isTyping) => {
+      if (socket.partner && socket.partner.connected) {
+        // Forward typing event to partner
+        socket.partner.emit("typing", isTyping);
+      }
     });
 
+    // ---------------- MESSAGE ----------------
+    socket.on("message", (msg) => {
+      if (!socket.partner || !socket.partner.connected) return;
+
+      socket.partner.emit("message", {
+        sender: "stranger",
+        type: "text",
+        content: msg,
+      });
+
+      // stop typing immediately
+      socket.partner.emit("typing", false);
+    });
+
+    // ---------------- IMAGE ----------------
+    socket.on("sendImage", (imageData) => {
+      if (!socket.partner) return;
+
+      socket.partner.emit("receiveImage", imageData);
+
+      // stop typing immediately
+      socket.partner.emit("typing", false);
+    });
+
+  // ---------------- AUDIO ----------------
+socket.on("sendAudio", (audioData) => {
+  if (!socket.partner) return;
+
+  // Pass through **exactly as received** (WebM Base64)
+  socket.partner.emit("receiveAudio", audioData);
+
+  // stop typing indicator
+  socket.partner.emit("typing", false);
+});
+
+
+
+
+    // ---------------- DISCONNECT ----------------
     socket.on("disconnect", () => {
       onlineUsers--;
       io.emit("status", { type: "online", count: onlineUsers });
