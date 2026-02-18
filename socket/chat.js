@@ -2,8 +2,18 @@ const { Server } = require("socket.io");
 
 module.exports = function setupSocket(server) {
   const io = new Server(server, {
-    cors: { origin: "*" },
-    maxHttpBufferSize: 10 * 1024 * 1024, // 10MB
+    cors: {
+      origin: [
+        "https://strange-frontend-updated2.vercel.app",
+        "https://strangerschat.fun",
+        "https://strangchat.in",
+        "https://www.strangchat.in",
+        "https://www.strangerschat.fun",
+        "http://localhost:3000"
+      ],
+      methods: ["GET", "POST"]
+    },
+    maxHttpBufferSize: 10 * 1024 * 1024 // 10MB for audio
   });
 
   let waitingUser = null;
@@ -11,7 +21,6 @@ module.exports = function setupSocket(server) {
 
   io.on("connection", (socket) => {
     onlineUsers++;
-    io.emit("status", { type: "online", count: onlineUsers });
     io.emit("online-users", onlineUsers);
 
     socket.partner = null;
@@ -19,13 +28,23 @@ module.exports = function setupSocket(server) {
 
     console.log("USER CONNECTED:", socket.id);
 
-    // ---------------- JOIN / MATCHING ----------------
+    // ---------------- JOIN / MATCH ----------------
     socket.on("join", () => {
-      socket.emit("status", { type: "searching", message: "Searching for a stranger..." });
+      if (!socket.connected) return;
+
+      socket.emit("status", {
+        type: "searching",
+        message: "Searching for a stranger..."
+      });
 
       if (socket.partner || socket.isWaiting) return;
 
-      if (waitingUser && waitingUser.id !== socket.id && waitingUser.connected) {
+      if (
+        waitingUser &&
+        waitingUser.id !== socket.id &&
+        waitingUser.connected
+      ) {
+        // Match users
         socket.partner = waitingUser;
         waitingUser.partner = socket;
 
@@ -35,79 +54,107 @@ module.exports = function setupSocket(server) {
         socket.emit("matched");
         waitingUser.emit("matched");
 
-        socket.emit("status", { type: "matched", message: "You are now connected to a stranger" });
-        waitingUser.emit("status", { type: "matched", message: "You are now connected to a stranger" });
+        socket.emit("status", {
+          type: "matched",
+          message: "You are now connected to a stranger"
+        });
+
+        waitingUser.emit("status", {
+          type: "matched",
+          message: "You are now connected to a stranger"
+        });
 
         waitingUser = null;
       } else {
         waitingUser = socket;
         socket.isWaiting = true;
-        socket.emit("status", { type: "waiting", message: "Waiting for another user..." });
+
+        socket.emit("status", {
+          type: "waiting",
+          message: "Waiting for another user..."
+        });
       }
     });
 
     // ---------------- TYPING ----------------
     socket.on("typing", (isTyping) => {
       if (socket.partner && socket.partner.connected) {
-        // Forward typing event to partner
         socket.partner.emit("typing", isTyping);
       }
     });
 
-    // ---------------- MESSAGE ----------------
+    // ---------------- TEXT MESSAGE ----------------
     socket.on("message", (msg) => {
       if (!socket.partner || !socket.partner.connected) return;
 
       socket.partner.emit("message", {
         sender: "stranger",
         type: "text",
-        content: msg,
+        content: msg
       });
 
-      // stop typing immediately
       socket.partner.emit("typing", false);
     });
 
     // ---------------- IMAGE ----------------
     socket.on("sendImage", (imageData) => {
-      if (!socket.partner) return;
+      if (!socket.partner || !socket.partner.connected) return;
 
       socket.partner.emit("receiveImage", imageData);
-
-      // stop typing immediately
       socket.partner.emit("typing", false);
     });
 
-  // ---------------- AUDIO ----------------
-socket.on("sendAudio", (audioData) => {
-  if (!socket.partner) return;
+    // ---------------- AUDIO ----------------
+    socket.on("sendAudio", (audioData) => {
+      if (!socket.partner || !socket.partner.connected) return;
 
-  // Pass through **exactly as received** (WebM Base64)
-  socket.partner.emit("receiveAudio", audioData);
+      socket.partner.emit("receiveAudio", audioData);
+      socket.partner.emit("typing", false);
+    });
 
-  // stop typing indicator
-  socket.partner.emit("typing", false);
-});
+    // ---------------- END CHAT (without full disconnect) ----------------
+    socket.on("endChat", () => {
+      if (socket.partner && socket.partner.connected) {
+        socket.partner.emit("status", {
+          type: "disconnected",
+          message: "Stranger left the chat"
+        });
 
-
-
-
-    // ---------------- DISCONNECT ----------------
-    socket.on("disconnect", () => {
-      onlineUsers--;
-      io.emit("status", { type: "online", count: onlineUsers });
-      io.emit("online-users", onlineUsers);
-
-      console.log("USER DISCONNECTED:", socket.id);
-
-      if (socket.partner) {
-        socket.partner.emit("message", { sender: "system", text: "Stranger disconnected." });
-        socket.partner.emit("status", { type: "disconnected", message: "Stranger left the chat" });
         socket.partner.partner = null;
         socket.partner.isWaiting = false;
       }
 
-      if (waitingUser && waitingUser.id === socket.id) waitingUser = null;
+      socket.partner = null;
+      socket.isWaiting = false;
+    });
+
+    // ---------------- DISCONNECT ----------------
+    socket.on("disconnect", () => {
+      onlineUsers = Math.max(onlineUsers - 1, 0);
+      io.emit("online-users", onlineUsers);
+
+      console.log("USER DISCONNECTED:", socket.id);
+
+      // If partner exists, notify them
+      if (socket.partner && socket.partner.connected) {
+        socket.partner.emit("message", {
+          sender: "system",
+          text: "Stranger disconnected."
+        });
+
+        socket.partner.emit("status", {
+          type: "disconnected",
+          message: "Stranger left the chat"
+        });
+
+        socket.partner.partner = null;
+        socket.partner.isWaiting = false;
+      }
+
+      // Remove from waiting queue if needed
+      if (waitingUser && waitingUser.id === socket.id) {
+        waitingUser = null;
+      }
 
       socket.partner = null;
       socket.isWaiting = false;
