@@ -1,21 +1,6 @@
-const { Server } = require("socket.io");
+// const { Server } = require("socket.io");
 
-module.exports = function setupSocket(server) {
-  const io = new Server(server, {
-    cors: {
-      origin: [
-        "https://strange-frontend-updated2.vercel.app",
-        "https://strangerschat.fun",
-        "https://strangchat.in",
-        "https://www.strangchat.in",
-        "https://www.strangerschat.fun",
-        "http://localhost:3000"
-      ],
-      methods: ["GET", "POST"]
-    },
-    maxHttpBufferSize: 10 * 1024 * 1024 // 10MB for audio
-  });
-
+module.exports = function setupSocket(io) { 
   let waitingUser = null;
   let onlineUsers = 0;
 
