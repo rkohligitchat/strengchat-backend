@@ -33,6 +33,22 @@ const allowedOrigins = [
   "http://localhost:3000"
 ];
 
+
+
+async function initDB() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS night_club_notifications (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  console.log("✅ Table ready");
+}
+
+initDB();
 app.use(
   cors({
     origin: function (origin, callback) {
