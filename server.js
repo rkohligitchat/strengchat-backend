@@ -1,3 +1,4 @@
+require("dotenv").config();
 
 const express = require("express");
 const http = require("http");
@@ -6,34 +7,64 @@ const { Server } = require("socket.io");
 const cron = require("node-cron");
 const webPush = require("web-push");
 const db = require("./db");
-
-const app = express();
 const notificationRoutes = require("./routes/notifications");
 
-// ===============================
-// ✅ CONFIGURE VAPID KEYS (ONLY ONCE)
-// ===============================
+const app = express();
+app.use(express.json());
+
+/* ===============================
+   ✅ CONFIGURE VAPID
+=============================== */
 webPush.setVapidDetails(
   "mailto:indianstrangerschat@gmail.com",
   process.env.VAPID_PUBLIC_KEY,
   process.env.VAPID_PRIVATE_KEY
 );
 
-// ---------------- BASIC MIDDLEWARE ----------------
-app.use(express.json());
+/* ===============================
+   ✅ SMART CORS CONFIG (FIXED)
+=============================== */
 
-// ---------------- CORS CONFIG ----------------
-const allowedOrigins = [
-  "https://strange-frontend-updated2.vercel.app",
-  "https://strangerschat.fun",
-  "https://www.strangerschat.fun",
-  "https://strangchat.in",
-  "https://www.strangchat.in",
-  "http://localhost:3000"
+const allowedDomains = [
+  "strangerschat.fun",
+    "strangerschat.fun/",
+
+  "www.strangerschat.fun",
+  "https://strangerschat.fun/",
+  "strangchat.in",
+  "www.strangchat.in",
+  "strange-frontend-updated2.vercel.app",
+  "localhost"
 ];
 
+function isAllowedOrigin(origin) {
+  try {
+    const url = new URL(origin);
+    return allowedDomains.includes(url.hostname);
+  } catch (err) {
+    return false;
+  }
+}
 
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
 
+      if (isAllowedOrigin(origin)) {
+        return callback(null, true);
+      }
+
+      console.log("❌ Blocked by CORS:", origin);
+      return callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true
+  })
+);
+
+/* ===============================
+   ✅ INIT DB
+=============================== */
 async function initDB() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS night_club_notifications (
@@ -46,53 +77,47 @@ async function initDB() {
   `);
   console.log("✅ Table ready");
 }
-
 initDB();
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
 
-      if (!allowedOrigins.includes(origin)) {
-        return callback(new Error("CORS not allowed for this origin"));
-      }
-
-      return callback(null, true);
-    },
-    credentials: true
-  })
-);
-
-// ---------------- HEALTH CHECK ----------------
+/* ===============================
+   ✅ HEALTH CHECK
+=============================== */
 app.get("/", (req, res) => {
   res.status(200).send("🚀 StrangerChat Socket Server Running");
 });
 
-// ---------------- ATTACH NOTIFICATION ROUTES ----------------
+/* ===============================
+   ✅ ROUTES
+=============================== */
 app.use("/api", notificationRoutes);
 
-// ---------------- CREATE HTTP SERVER ----------------
+/* ===============================
+   ✅ SERVER
+=============================== */
 const server = http.createServer(app);
 
-// ===============================
-// ✅ CREATE ONLY ONE SOCKET.IO INSTANCE
-// ===============================
+/* ===============================
+   ✅ SOCKET.IO (MATCH SAME CORS)
+=============================== */
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      if (!origin || isAllowedOrigin(origin)) {
+        callback(null, true);
+      } else {
+        callback("Socket CORS blocked");
+      }
+    },
     credentials: true
   }
 });
 
-// ===============================
-// ✅ ATTACH SOCKET MODULES
-// ===============================
 require("./socket/chat")(io);
 require("./socket/nightclub")(io);
 
-// ===============================
-// ⏰ DAILY 10PM NIGHT CLUB PUSH (IST)
-// ===============================
+/* ===============================
+   ⏰ CRON JOB (IST 10PM)
+=============================== */
 cron.schedule(
   "0 22 * * *",
   async () => {
@@ -126,12 +151,8 @@ cron.schedule(
             payload
           );
         } catch (err) {
-          console.error("❌ Push failed full error:", {
-            statusCode: err.statusCode,
-            message: err.message,
-            body: err.body
-          });
-          // Remove expired subscriptions
+          console.error("❌ Push failed:", err.statusCode);
+
           if (err.statusCode === 410 || err.statusCode === 404) {
             await db.query(
               "DELETE FROM night_club_notifications WHERE endpoint = ?",
@@ -146,12 +167,12 @@ cron.schedule(
       console.error("❌ Cron crashed:", err);
     }
   },
-  {
-    timezone: "Asia/Kolkata"
-  }
+  { timezone: "Asia/Kolkata" }
 );
 
-// ---------------- START SERVER ----------------
+/* ===============================
+   ✅ START SERVER
+=============================== */
 const PORT = process.env.PORT || 4000;
 
 server.listen(PORT, () => {
